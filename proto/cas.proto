@@ -1,0 +1,100 @@
+// Copyright 2026 The Graft Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package graft.cas.v1;
+
+// Digest uniquely identifies any chunk, blob, directory, or commit in Graft.
+// By default, the hash is 32 bytes representing a BLAKE3-256 digest.
+message Digest {
+  // 32-byte BLAKE3-256 digest of the uncompressed content.
+  bytes hash = 1;
+
+  // The size of the raw content in bytes.
+  int64 size_bytes = 2;
+}
+
+// A FileNode represents a single regular file entry within a Directory.
+message FileNode {
+  // Base name of the file (e.g., "lib.rs").
+  string name = 1;
+
+  // The digest of the file's content (or ChunkManifest if chunked).
+  Digest digest = 2;
+
+  // POSIX executable permission bit (true for 0755, false for 0644).
+  bool is_executable = 3;
+
+  // True if the digest points to a ChunkManifest rather than raw bytes.
+  bool is_chunked = 4;
+}
+
+// A DirectoryNode represents a pointer to a child subdirectory.
+message DirectoryNode {
+  // Base name of the directory (e.g., "src").
+  string name = 1;
+
+  // Digest pointing to the child Directory manifest.
+  Digest digest = 2;
+}
+
+// A SymlinkNode represents a symbolic link.
+message SymlinkNode {
+  // Base name of the symlink.
+  string name = 1;
+
+  // Target path the symlink points to.
+  string target = 2;
+}
+
+// A Directory represents an entire directory level in the Merkle DAG.
+// It is serialized deterministically (sorted by name) to produce a unique digest.
+message Directory {
+  // List of regular files, sorted alphabetically by name.
+  repeated FileNode files = 1;
+
+  // List of subdirectories, sorted alphabetically by name.
+  repeated DirectoryNode directories = 2;
+
+  // List of symlinks, sorted alphabetically by name.
+  repeated SymlinkNode symlinks = 3;
+}
+
+// For large files (> 2 MB), the content is split into chunks using FastCDC.
+message ChunkManifest {
+  // Total uncompressed file size across all chunks.
+  int64 total_size_bytes = 1;
+
+  // Ordered list of chunk digests that reassemble the complete file.
+  repeated Digest chunks = 2;
+}
+
+// A Commit represents a point-in-time snapshot of the repository.
+message Commit {
+  // Digests of parent commits (0 for initial commit, 1 for linear, 2+ for merges).
+  repeated Digest parent_commits = 1;
+
+  // Digest pointing to the root Directory manifest.
+  Digest root_directory_digest = 2;
+
+  // Author identity string (e.g., "Name <email@example.com>").
+  string author = 3;
+
+  // UTC Unix timestamp in seconds.
+  int64 timestamp_seconds = 4;
+
+  // Commit message description.
+  string message = 5;
+}

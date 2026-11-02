@@ -1,0 +1,18 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Temporary editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local configuration overrides
+.env
