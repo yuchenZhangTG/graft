@@ -68,7 +68,7 @@ Graft solves this by decoupling the **storage DAG** from the **working copy**:
    * **Lower Layer (Read-Only FUSE)**: Virtual directory tree streaming chunks from CAS on demand.
    * **Upper Layer (Native NVMe CoW)**: Native kernel Copy-on-Write directory. Compilers, linters, and agents write intermediate build artifacts at **100% native kernel speed** with zero FUSE context-switch overhead.
 4. **Instant Diff & Commit**: Committing changes doesn't require scanning the entire working tree. Graft only inspects the local CoW upper layer, hashing only modified files in milliseconds ($O(\text{modified})$ time).
-5. **Server-Side 3-Way Merkle Merging & Cherry-Picking**: Reconciles parallel agent branches or ports individual commit deltas directly in CAS or active workspaces in $O(\text{changed})$ time with $O(1)$ subtree pruning, LCS diff3 hunk merging, 3-way conflict markers, strategy overrides (`ours`, `theirs`), and `--continue` / `--abort` lifecycle handling.
+5. **Server-Side 3-Way Merkle Merging & AST Semantic Merge Engine**: Reconciles parallel agent branches or ports individual commit deltas directly in CAS or active workspaces in $O(\text{changed})$ time with $O(1)$ subtree pruning. Features a **lossless Concrete Syntax Tree (CST) semantic merge engine** (for Rust, Python, Go, and JS/TS) that automatically unions independent imports, cleanly resolves adjacent function additions, recurses 1 level into containers (`impl`, `mod`, `class`), and surgically scopes conflicts strictly to individual declarations.
 6. **Distributed Two-Tier Storage**: Combines a local NVMe L1 cache with durable Google Cloud Storage (`gs://...`) L2 persistence.
 7. **Cloud Spanner Linearizable Metadata**: Sub-millisecond KeySet CRUD operations (`/v1/{session}:read` and `/v1/{session}:commit`) with atomic Compare-And-Swap (CAS) branch coordination and workspace lease locking.
 
@@ -194,7 +194,7 @@ graft/
 Graft includes comprehensive unit tests and isolated end-to-end integration workflows:
 
 ```bash
-# Run all unit tests, integration tests, and doc tests (93 tests)
+# Run all unit tests, integration tests, and doc tests (100 tests)
 cargo test
 
 # Run tests against live Google Cloud Spanner instance (if configured)

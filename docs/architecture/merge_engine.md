@@ -64,7 +64,51 @@ When both branches modify the same file ($D_{\text{ours}} \neq D_{\text{theirs}}
 
 ---
 
-## 4. Linearizable ACID Branch Updates via Cloud Spanner
+## 4. AST & Semantic 3-Way Merge Engine for Autonomous AI Agents
+
+When multiple autonomous coding agents work concurrently on a repository, standard line-level merge often fails due to adjacent insertions (e.g. adding two functions to the bottom of the same file or adding two independent imports to the top).
+
+Graft implements a **lossless, Concrete Syntax Tree (CST) semantic merge engine** (`src/cas/semantic_merge.rs`) supporting Rust, Python, Go, and JavaScript/TypeScript:
+
+```
+            Base File (main.rs)
+               ┌─────────┐
+               │ fn a()  │
+               └────┬────┘
+          ┌─────────┴─────────┐
+          ▼                   ▼
+     Agent 1 (Ours)      Agent 2 (Theirs)
+    ┌──────────────┐    ┌──────────────┐
+    │ fn a()       │    │ fn a() [edit]│
+    │ fn b() [new] │    │              │
+    └───────┬──────┘    └──────┬───────┘
+            └─────────┬────────┘
+                      ▼
+           AST Semantic Merge
+          ┌───────────────────┐
+          │ fn a() [edited]   │  ✅ Auto-Merged!
+          │ fn b() [new]      │  ✅ Zero Conflict!
+          └───────────────────┘
+```
+
+### Key Capabilities
+1. **3-Way Import Union & Deletion**:
+   - `kept_base = base ∩ ours ∩ theirs`
+   - `additions = (ours \ base) ∪ (theirs \ base)`
+   - Single-sided deletions from base are respected rather than resurrected.
+2. **Lossless CST Byte Preservation**:
+   - Trivia-preserving parser partitions files into byte-contiguous spans such that concatenating elements reproduces the original file byte-for-byte (`reconstruct(parse(src)) == src`).
+   - Handles complex language tokens including Rust lifetimes (`'a`, `'static`), raw string literals (`r#"..."#`), and Python indentation blocks.
+3. **Container Recursing (1 Level Deep)**:
+   - Recurses 1 level inside containers (`impl Foo`, `mod tests`, `class Service`), allowing concurrent method or `#[test]` additions from parallel agents to merge with **zero conflicts**.
+4. **Surgical Intra-Item Conflict Scoping**:
+   - When both agents modify the exact same function, line-level 3-way diff is scoped strictly inside that function, keeping the rest of the file 100% syntactically valid.
+5. **Safe Fallback**:
+   - Files > 1 MB, duplicate identifier keys in the same scope, or syntax failures fall back immediately to line-level diff3.
+
+---
+
+## 5. Linearizable ACID Branch Updates via Cloud Spanner
 
 To guarantee that branch heads never experience lost updates or race conditions, Graft coordinates branches through **Google Cloud Spanner**:
 

@@ -722,8 +722,18 @@ fn merge_directories_recursive<B: BlobStore + ?Sized>(
                         let ours_str = String::from_utf8_lossy(&ours_bytes);
                         let theirs_str = String::from_utf8_lossy(&theirs_bytes);
 
-                        let (merged_text, conflict) =
-                            merge3_text_with_strategy(&base_str, &ours_str, &theirs_str, strategy);
+                        let ext = Path::new(&path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("");
+
+                        let (merged_text, conflict) = crate::cas::semantic_merge::semantic_merge_with_strategy(
+                            ext,
+                            &base_str,
+                            &ours_str,
+                            &theirs_str,
+                            strategy,
+                        );
 
                         let merged_digest = blob_store.put(merged_text.as_bytes())?;
                         let chosen_mode = if m_o == "0755" || m_t == "0755" {

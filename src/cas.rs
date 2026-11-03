@@ -22,6 +22,7 @@ pub mod digest;
 pub mod gc;
 pub mod gcs;
 pub mod merge;
+pub mod semantic_merge;
 
 pub use blob_store::{BlobInfo, BlobStore, LocalBlobStore};
 pub use cached_store::CachedBlobStore;
@@ -41,3 +42,4 @@ pub use merge::{
     merge3_text, merge3_text_with_strategy, merge_trees, merge_trees_with_strategy,
     CherryPickResult, ConflictStrategy, MergeResult, TreeDelta,
 };
+pub use semantic_merge::{semantic_merge_with_strategy, SupportedLanguage};
