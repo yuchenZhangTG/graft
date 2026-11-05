@@ -23,6 +23,7 @@ mod chunking_workflow;
 mod fuse_mount_workflow;
 mod gc_workflow;
 mod gcs_workflow;
+mod local_first_workflow;
 mod merge_workflow;
 mod spanner_workflow;
 mod workspace_mount_workflow;

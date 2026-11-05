@@ -22,6 +22,7 @@ pub mod digest;
 pub mod gc;
 pub mod gcs;
 pub mod merge;
+pub mod s3;
 pub mod semantic_merge;
 
 pub use blob_store::{BlobInfo, BlobStore, LocalBlobStore};
@@ -42,4 +43,5 @@ pub use merge::{
     merge3_text, merge3_text_with_strategy, merge_trees, merge_trees_with_strategy,
     CherryPickResult, ConflictStrategy, MergeResult, TreeDelta,
 };
+pub use s3::{MockS3Transport, S3BlobStore, S3Config, S3Transport, UreqS3Transport};
 pub use semantic_merge::{semantic_merge_with_strategy, SupportedLanguage};

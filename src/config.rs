@@ -30,9 +30,13 @@ use std::path::PathBuf;
 /// Persistent configuration stored in `$HOME/.graft/config.json`.
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraftConfigFile {
-    /// Default remote CAS URL (e.g. `gs://<bucket>/<prefix>`).
+    /// Default remote CAS URL (e.g. `s3://<bucket>/<prefix>` or `gs://<bucket>/<prefix>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
+
+    /// Default metadata store URL (e.g. `sqlite:~/.graft/metadata.db` or Cloud Spanner resource path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<String>,
 
     /// Default Cloud Spanner database resource path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +111,7 @@ impl GraftConfigFile {
                     let val = v.trim().trim_matches('"').trim_matches('\'');
                     match key.as_str() {
                         "remote" => cfg.remote = Some(val.to_string()),
+                        "metadata" | "meta" => cfg.metadata = Some(val.to_string()),
                         "spanner_database" | "spanner" | "database" => {
                             cfg.spanner_database = Some(val.to_string())
                         }
@@ -146,6 +151,7 @@ impl GraftConfigFile {
     pub fn get(&self, key: &str) -> Option<String> {
         match key.to_lowercase().as_str() {
             "remote" => self.remote.clone(),
+            "metadata" | "meta" => self.metadata.clone(),
             "spanner_database" | "spanner" => self.spanner_database.clone(),
             "cas_dir" | "cas" => self.cas_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
             "storage_dir" | "storage" => {
@@ -160,6 +166,7 @@ impl GraftConfigFile {
     pub fn set(&mut self, key: &str, value: &str) -> io::Result<()> {
         match key.to_lowercase().as_str() {
             "remote" => self.remote = Some(value.to_string()),
+            "metadata" | "meta" => self.metadata = Some(value.to_string()),
             "spanner_database" | "spanner" => self.spanner_database = Some(value.to_string()),
             "cas_dir" | "cas" => self.cas_dir = Some(PathBuf::from(value)),
             "storage_dir" | "storage" => self.storage_dir = Some(PathBuf::from(value)),
@@ -168,7 +175,7 @@ impl GraftConfigFile {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "Unknown config key '{}'. Valid keys: remote, spanner_database, cas_dir, storage_dir, agent_id",
+                        "Unknown config key '{}'. Valid keys: remote, metadata, spanner_database, cas_dir, storage_dir, agent_id",
                         unknown
                     ),
                 ));
@@ -182,6 +189,7 @@ impl GraftConfigFile {
     pub fn unset(&mut self, key: &str) -> io::Result<bool> {
         let removed = match key.to_lowercase().as_str() {
             "remote" => self.remote.take().is_some(),
+            "metadata" | "meta" => self.metadata.take().is_some(),
             "spanner_database" | "spanner" => self.spanner_database.take().is_some(),
             "cas_dir" | "cas" => self.cas_dir.take().is_some(),
             "storage_dir" | "storage" => self.storage_dir.take().is_some(),
@@ -199,6 +207,9 @@ impl GraftConfigFile {
         let mut entries = Vec::new();
         if let Some(ref r) = self.remote {
             entries.push(("remote".to_string(), r.clone()));
+        }
+        if let Some(ref m) = self.metadata {
+            entries.push(("metadata".to_string(), m.clone()));
         }
         if let Some(ref s) = self.spanner_database {
             entries.push(("spanner_database".to_string(), s.clone()));
@@ -227,7 +238,8 @@ mod tests {
         let cfg_path = tmp.path().join("config.json");
 
         let mut cfg = GraftConfigFile::default();
-        cfg.remote = Some("gs://my-bucket/repo".to_string());
+        cfg.remote = Some("s3://my-bucket/repo".to_string());
+        cfg.metadata = Some("sqlite:~/.graft/meta.db".to_string());
         cfg.spanner_database = Some("projects/p/instances/i/databases/d".to_string());
         cfg.cas_dir = Some(PathBuf::from("/mnt/nvme/cas"));
         cfg.storage_dir = Some(PathBuf::from("/mnt/nvme/storage"));
@@ -240,7 +252,8 @@ mod tests {
         assert_eq!(loaded, cfg);
 
         // Test getters
-        assert_eq!(loaded.get("remote").unwrap(), "gs://my-bucket/repo");
+        assert_eq!(loaded.get("remote").unwrap(), "s3://my-bucket/repo");
+        assert_eq!(loaded.get("metadata").unwrap(), "sqlite:~/.graft/meta.db");
         assert_eq!(
             loaded.get("spanner_database").unwrap(),
             "projects/p/instances/i/databases/d"
@@ -257,14 +270,16 @@ mod tests {
 
         let ini_content = r#"
 # Graft configuration
-remote = "gs://fallback-bucket/repo"
+remote = "s3://fallback-bucket/repo"
+metadata = sqlite:/tmp/custom_meta.db
 spanner_database = projects/test/instances/dev/databases/meta
 cas_dir = /tmp/custom_cas
 "#;
         fs::write(&cfg_path, ini_content)?;
 
         let loaded = GraftConfigFile::load_from_path(Some(cfg_path));
-        assert_eq!(loaded.remote.unwrap(), "gs://fallback-bucket/repo");
+        assert_eq!(loaded.remote.unwrap(), "s3://fallback-bucket/repo");
+        assert_eq!(loaded.metadata.unwrap(), "sqlite:/tmp/custom_meta.db");
         assert_eq!(
             loaded.spanner_database.unwrap(),
             "projects/test/instances/dev/databases/meta"

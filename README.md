@@ -82,17 +82,23 @@ cargo build --release --features fuse
 graft --version
 ```
 
-### 2. Configure Storage (Local vs. Cloud)
+### 2. Configure Storage (Local-First vs. S3/R2 vs. Google Cloud)
 Graft uses persistent configuration in `$HOME/.graft/config.json`:
 
 ```bash
-# Option A: Local storage (default, zero setup needed)
-graft config set cas_dir /tmp/graft/cas
+# Option A: 100% Local-First (Default, $0 Cost, Zero Cloud Accounts)
+# Uses embedded SQLite for ACID branch tracking & local NVMe SSD for CAS:
+graft config set cas_dir ~/.graft/cas
 
-# Option B: Distributed Cloud storage (GCS + Spanner)
+# Option B: S3 / Cloudflare R2 / MinIO (Self-Hosted or Zero-Egress Cloud)
+# Built-in AWS SigV4 signing; targets MinIO, Cloudflare R2, AWS S3, or Ceph:
+graft config set remote s3://my-cas-bucket/graft-repo
+graft config set metadata sqlite:~/.graft/metadata.db
+
+# Option C: Enterprise Google Cloud (GCS + Cloud Spanner)
 graft config set remote gs://my-team-bucket/graft-repo
 graft config set spanner_database projects/my-project/instances/my-instance/databases/graft-metadata
-graft spanner init  # One-time schema initialization
+graft spanner init  # One-time Spanner schema initialization
 ```
 
 ### 3. Essential 30-Second Workflow

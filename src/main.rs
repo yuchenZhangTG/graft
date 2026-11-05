@@ -27,13 +27,14 @@ use clap::{Parser, Subcommand};
 use graft::cas::{
     apply_changes_to_tree, apply_tree_delta_to_workspace, cherry_pick_commit, extract_tree_delta,
     find_common_ancestor, get_commit_history, merge_trees, BlobStore, CachedBlobStore, Commit,
-    ConflictStrategy, Digest, GcsBlobStore, LocalBlobStore, TreeDelta,
+    ConflictStrategy, Digest, GcsBlobStore, LocalBlobStore, S3BlobStore, TreeDelta,
 };
 use graft::git::{
     compute_diff_stats, diff_trees, diff_workspace, export_patch_file, export_tree_to_dir,
 };
 use graft::metadata::{
     normalize_ref_name, resolve_ref, validate_branch_name, LocalMetadataStore, MetadataStore,
+    SqliteMetadataStore,
 };
 use graft::workspace::{CherryPickState, WorkspaceManager};
 use std::fs;
@@ -54,9 +55,16 @@ pub struct StorageArgs {
     #[arg(
         long,
         env = "GRAFT_REMOTE",
-        help = "Remote storage URL (e.g. 'gs://my-bucket/graft-cas', defaults to ~/.graft/config)"
+        help = "Remote CAS storage URL (e.g. 's3://my-bucket/cas' or 'gs://my-bucket/cas', defaults to ~/.graft/config)"
     )]
     pub remote: Option<String>,
+
+    #[arg(
+        long,
+        env = "GRAFT_METADATA",
+        help = "Metadata store backend (e.g. 'sqlite:~/.graft/metadata.db', 'sqlite::memory:', or Cloud Spanner resource path)"
+    )]
+    pub metadata: Option<String>,
 
     #[arg(
         long,
@@ -67,7 +75,7 @@ pub struct StorageArgs {
 
     #[arg(
         long,
-        help = "Force local-only storage (ignores remote GCS and Spanner database from config)"
+        help = "Force local-only storage (ignores remote S3/GCS and Spanner database from config)"
     )]
     pub local: bool,
 }
@@ -113,6 +121,21 @@ impl StorageArgs {
         cfg.spanner_database
     }
 
+    /// Resolves the effective metadata store configuration.
+    pub fn resolved_metadata(&self) -> Option<String> {
+        if self.local {
+            return None;
+        }
+        if let Some(ref m) = self.metadata {
+            return Some(m.clone());
+        }
+        let cfg = graft::config::GraftConfigFile::load();
+        if let Some(ref m) = cfg.metadata {
+            return Some(m.clone());
+        }
+        cfg.spanner_database
+    }
+
     /// Opens the Content-Addressed Storage engine.
     /// If remote is specified (via CLI flag, env, or ~/.graft/config.json),
     /// wraps the local store in a tiered [`CachedBlobStore`].
@@ -120,23 +143,80 @@ impl StorageArgs {
         let cas_dir = self.resolved_cas_dir();
         let local = Arc::new(LocalBlobStore::new(&cas_dir)?);
         if let Some(remote_url) = self.resolved_remote() {
-            let gcs = Arc::new(GcsBlobStore::new(&remote_url)?);
-            let tiered = Arc::new(CachedBlobStore::new(local, gcs));
+            let remote_store: Arc<dyn BlobStore> = if remote_url.starts_with("s3://") {
+                Arc::new(S3BlobStore::new(&remote_url)?)
+            } else if remote_url.starts_with("gs://") {
+                Arc::new(GcsBlobStore::new(&remote_url)?)
+            } else {
+                anyhow::bail!(
+                    "Unsupported remote storage URL '{}'. Supported schemes: s3://, gs://",
+                    remote_url
+                );
+            };
+            let tiered = Arc::new(CachedBlobStore::new(local, remote_store));
             Ok(tiered)
         } else {
             Ok(local)
         }
     }
 
-    /// Opens the metadata store (either GCP Cloud Spanner or local store).
+    /// Opens the metadata store (SQLite, Cloud Spanner, or directory fallback).
     pub fn open_metadata(&self) -> anyhow::Result<Arc<dyn MetadataStore>> {
-        if let Some(spanner_db) = self.resolved_spanner_database() {
-            let store = graft::metadata::SpannerMetadataStore::connect_gcp(&spanner_db)?;
-            Ok(Arc::new(store))
+        let meta_target = if self.local {
+            None
+        } else if let Some(ref m) = self.metadata {
+            Some(m.clone())
+        } else if let Some(ref s) = self.spanner_database {
+            Some(s.clone())
         } else {
-            let cas_dir = self.resolved_cas_dir();
-            let meta_dir = cas_dir.join("metadata");
+            let cfg = graft::config::GraftConfigFile::load();
+            cfg.metadata.or(cfg.spanner_database)
+        };
+
+        if let Some(ref target) = meta_target {
+            if target.starts_with("sqlite:") || target.ends_with(".db") || target == ":memory:" {
+                let clean = target
+                    .strip_prefix("sqlite://")
+                    .or_else(|| target.strip_prefix("sqlite:"))
+                    .unwrap_or(target);
+                let resolved_path = if clean == ":memory:" {
+                    PathBuf::from(":memory:")
+                } else if let Some(stripped) = clean.strip_prefix("~/") {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                    PathBuf::from(home).join(stripped)
+                } else {
+                    PathBuf::from(clean)
+                };
+                let store = SqliteMetadataStore::open(resolved_path)?;
+                return Ok(Arc::new(store));
+            } else if target.contains("projects/") && target.contains("databases/") {
+                let store = graft::metadata::SpannerMetadataStore::connect_gcp(target)?;
+                return Ok(Arc::new(store));
+            } else {
+                let resolved_path = if let Some(stripped) = target.strip_prefix("~/") {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                    PathBuf::from(home).join(stripped)
+                } else {
+                    PathBuf::from(target)
+                };
+                if resolved_path.is_dir() {
+                    return Ok(Arc::new(LocalMetadataStore::new(resolved_path)?));
+                }
+                let store = SqliteMetadataStore::open(resolved_path)?;
+                return Ok(Arc::new(store));
+            }
+        }
+
+        // Local-first zero-cloud default: embedded SQLite metadata store
+        let cas_dir = self.resolved_cas_dir();
+        let meta_dir = cas_dir.join("metadata");
+        let meta_db = cas_dir.join("metadata.db");
+
+        // Backward compatibility: if metadata/ directory exists with refs, use LocalMetadataStore
+        if meta_dir.is_dir() && !meta_db.exists() && meta_dir.join("refs").is_dir() {
             Ok(Arc::new(LocalMetadataStore::new(meta_dir)?))
+        } else {
+            Ok(Arc::new(SqliteMetadataStore::open(meta_db)?))
         }
     }
 }
@@ -2988,18 +3068,29 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 println!("\nActive Resolved Values:");
-                let storage_args = StorageArgs { cas_dir: None, remote: None, spanner_database: None, local: false };
+                let storage_args = StorageArgs {
+                    cas_dir: None,
+                    remote: None,
+                    metadata: None,
+                    spanner_database: None,
+                    local: false,
+                };
                 println!("  cas_dir          = {}", storage_args.resolved_cas_dir().display());
                 println!("  storage_dir      = {}", resolve_storage_dir(Path::new("/tmp/graft/storage")).display());
                 if let Some(r) = storage_args.resolved_remote() {
                     println!("  remote           = {}", r);
                 } else {
-                    println!("  remote           = <none> (local storage)");
+                    println!("  remote           = <none> (local NVMe CAS)");
+                }
+                if let Some(m) = storage_args.resolved_metadata() {
+                    println!("  metadata         = {}", m);
+                } else {
+                    println!("  metadata         = <default> (local SQLite metadata.db)");
                 }
                 if let Some(s) = storage_args.resolved_spanner_database() {
                     println!("  spanner_database = {}", s);
                 } else {
-                    println!("  spanner_database = <none> (local metadata)");
+                    println!("  spanner_database = <none> (using local SQLite)");
                 }
             }
             ConfigCommands::Path => {

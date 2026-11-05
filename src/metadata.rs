@@ -23,9 +23,11 @@
 
 pub mod local;
 pub mod spanner;
+pub mod sqlite;
 
 pub use local::LocalMetadataStore;
 pub use spanner::{SpannerConfig, SpannerMetadataStore};
+pub use sqlite::SqliteMetadataStore;
 
 use crate::cas::commit::Commit;
 use crate::cas::digest::Digest;
