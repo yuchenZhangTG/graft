@@ -54,6 +54,10 @@ ring = "0.17"
 name = "graft"
 path = "src/main.rs"
 
+[[bin]]
+name = "graftd"
+path = "src/bin/graftd.rs"
+
 [lib]
 name = "graft"
 path = "src/lib.rs"

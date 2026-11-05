@@ -20,6 +20,7 @@ mod agent_workflow;
 mod branch_merge_workflow;
 mod cherry_pick_workflow;
 mod chunking_workflow;
+mod daemon_workflow;
 mod fuse_mount_workflow;
 mod gc_workflow;
 mod gcs_workflow;

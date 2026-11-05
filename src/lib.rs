@@ -19,6 +19,7 @@
 
 pub mod cas;
 pub mod config;
+pub mod daemon;
 pub mod git;
 pub mod metadata;
 pub mod review;
@@ -28,7 +29,7 @@ pub mod workspace;
 
 pub use review::{PullRequest, PullRequestStatus, ReviewComment, ReviewManager};
 
-pub use config::GraftConfigFile;
+pub use config::{GraftConfigFile, StorageArgs};
 
 pub use cas::{
     apply_changes_to_tree, apply_changes_to_tree_with_config, apply_tree_delta_to_workspace,
