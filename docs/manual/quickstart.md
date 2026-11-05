@@ -18,33 +18,46 @@ graft --version
 
 ---
 
-## 2. Choosing Storage: Local vs. Cloud (GCS + Spanner)
+## 2. Choosing Storage: Local-First vs. S3/MinIO vs. Enterprise Cloud
 
-Graft uses a unified, pluggable architecture. The exact same commands work across local workstations and distributed cloud fleets.
+Graft uses a unified, pluggable architecture. The exact same commands (`ingest`, `mount`, `commit`, `diff`, `log`, `merge`, `web`) work identically across your local laptop, a self-hosted Docker cluster, or distributed enterprise cloud fleets.
 
-### Option 2A: Local Storage (Default, Zero-Setup)
-By default, Graft stores CAS blobs in `/tmp/graft/cas` and references in `/tmp/graft/cas/metadata`. No configuration is required.
+### Option 2A: 100% Local-First (Default, Zero-Setup, $0 Cost)
+**No cloud accounts, credentials, or network connections required.**
 
+By default, Graft runs entirely on your local machine:
+- **CAS Blobs & Merkle Trees**: Local NVMe SSD directory (`/tmp/graft/cas` or `~/.graft/cas`).
+- **Metadata, Branch Refs, & Agent Leases**: Embedded single-file SQLite database with WAL mode and atomic ACID Compare-And-Swap (`~/.graft/metadata.db`).
+
+You can start using Graft immediately without running any configuration commands!
 ```bash
 # Optional: customize local storage directory
-graft config set cas_dir /tmp/graft/cas
+graft config set cas_dir ~/.graft/cas
 ```
 
-### Option 2B: Distributed Cloud Storage (GCS + Cloud Spanner)
-For multi-VM agent pools, distributed CI runners, and Cloudtop environments:
+### Option 2B: Self-Hosted S3 / MinIO / Cloudflare R2
+For teams and multi-machine agent clusters that want a shared remote CAS without cloud lock-in or high egress fees:
+- **MinIO (Local Docker 1-Liner)**:
+  ```bash
+  docker run -d -p 9000:9000 -p 9001:9001 -e "MINIO_ROOT_USER=minioadmin" -e "MINIO_ROOT_PASSWORD=minioadmin" minio/minio server /data
+  ```
+- **Configure Graft S3 Remote CAS & SQLite**:
+  ```bash
+  graft config set remote s3://my-cas-bucket/graft-repo
+  graft config set metadata sqlite:~/.graft/metadata.db
+  ```
+- Built-in pure-Rust **AWS SigV4 signing** automatically authenticates against AWS S3, MinIO, Cloudflare R2 ($0 egress), or Ceph.
+
+### Option 2C: Enterprise Google Cloud (GCS + Cloud Spanner)
+For enterprise-scale multi-VM agent pools, distributed CI runners, and Cloudtop environments:
 - **CAS Blobs & Merkle Trees**: Tiered cache with remote Google Cloud Storage (`gs://...`).
 - **Metadata & Concurrency Leases**: Google Cloud Spanner with linearizable ACID transactions.
-
-Configure once using the persistent config file (`$HOME/.graft/config.json`) so you don't need to re-export environment variables in every shell:
 
 ```bash
 # 1. Save settings to $HOME/.graft/config.json:
 graft config set remote gs://my-team-bucket/graft-repo
 graft config set spanner_database projects/my-project/instances/my-instance/databases/graft-metadata
 graft config set cas_dir /mnt/nvme/cas  # Local NVMe L1 cache
-
-# Verify active settings:
-graft config list
 
 # 2. One-time setup: automatically initialize Spanner database schema
 graft spanner init
@@ -144,8 +157,9 @@ Applying 1 file change to Merkle tree...
   Branch:  'refs/heads/main' advanced -> b61f9c4de09d3957...:158
 ```
 
-- **In Local Mode (2A)**: Updates local reference files atomically via file-lock CAS.
-- **In Cloud Mode (2B)**: Pushes new blobs to GCS and executes a linearizable Compare-And-Swap transaction in Cloud Spanner. If another agent committed concurrently, Graft detects it and allows automatic 3-way merging.
+- **In Local Mode (2A)**: Updates branch references atomically via embedded SQLite transactional Compare-And-Swap.
+- **In S3/MinIO Mode (2B)**: Pushes new blobs to S3/MinIO/R2 and updates SQLite branch head atomically.
+- **In Enterprise Cloud Mode (2C)**: Pushes new blobs to GCS and executes a linearizable Compare-And-Swap transaction in Cloud Spanner. If another agent committed concurrently, Graft detects it and enables automatic 3-way AST semantic merging.
 
 ---
 
